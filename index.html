@@ -340,6 +340,7 @@ body.pdf-mode .status-bar, body.pdf-mode .date-picker-bar, body.pdf-mode .export
 <div class="status-bar">
   <div class="status-pill" id="pdaStatus"><div class="status-dot"></div><span class="status-text">PDA · INIT</span></div>
   <div class="status-pill" id="penjStatus"><div class="status-dot"></div><span class="status-text">PENJUALAN · INIT</span></div>
+  <div class="status-pill" id="pengunjungStatus"><div class="status-dot"></div><span class="status-text">PENGUNJUNG · INIT</span></div>
   <button class="refresh-btn" id="refreshAllBtn">↻ REFRESH ALL</button>
 </div>
 
@@ -507,6 +508,10 @@ const PDA_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQldjdx
 const PENJ_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRZPWYlaHsoy5hIV2H_Ss11bAIfijtrSZIDkkQfpVdvpZj8EhqyiuUz2yapvG9gg7bRxBeLkbY4f3Zb/pub?output=csv";
 const PENGUNJUNG_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQeMtEdSvQ3msdAgt93iqzmpoK0ijtz9dt8QTPkBtxOQL63zhKz5BKLJy-34LzBMyNb1U-4nrC_chyY/pub?output=csv";
 
+// Minimal fallback data (dashboard will load actual data from spreadsheet)
+const PDA_FALLBACK = [];
+const PENJ_FALLBACK = [];
+
 // Unit ordering — derived from "1. Ancol" prefix in data
 const UNIT_ORDER = ['1. Ancol', '2. Dufan', '3. Seaworld', '4. Samudra', '5. Atlantis', '6. Jakarta Bird Land'];
 const TIDAK_DITEMUKAN = 'Tidak ditemukan';
@@ -587,7 +592,10 @@ function loadStateFromStorage() {
 }
 
 function setStatus(which, type, text) {
-  const el = document.getElementById(which === 'pda' ? 'pdaStatus' : 'penjStatus');
+  let elId = 'penjStatus';
+  if (which === 'pda') elId = 'pdaStatus';
+  else if (which === 'pengunjung') elId = 'pengunjungStatus';
+  const el = document.getElementById(elId);
   if (!el) return;
   el.className = 'status-pill ' + type;
   el.querySelector('.status-dot').className = 'status-dot ' + type;
@@ -817,12 +825,27 @@ async function loadPenjualan(silent = false) {
     return false;
   }
 }
+async function loadPengunjung(silent = false) {
+  try {
+    const text = await fetchCSV(state.pengunjungUrl);
+    state.pengunjungRaw = transformPengunjungCSV(text);
+    state.pengunjungLastFetch = new Date().toISOString();
+    saveState();
+    if (!silent) showToast(`✓ Pengunjung: ${state.pengunjungRaw.length} baris`, 'success');
+    return true;
+  } catch (e) {
+    console.error('Pengunjung fetch failed:', e);
+    if (!silent) showToast('✗ Pengunjung: ' + e.message, 'error');
+    return false;
+  }
+}
 
 // ============ DATE / FILTER ============
 function recomputeDataRange() {
   const dates = [];
   state.pdaRaw.forEach(r => dates.push(r.date));
   state.penjRaw.forEach(r => dates.push(r.d));
+  state.pengunjungRaw.forEach(r => dates.push(r.d));
   dates.sort();
   state.dataMin = dates[0] || null;
   state.dataMax = dates[dates.length-1] || null;
@@ -878,6 +901,10 @@ function filterPDA(start, end) {
 function filterPenj(start, end) {
   if (!start || !end) return [];
   return state.penjRaw.filter(r => r.d >= start && r.d <= end);
+}
+function filterPengunjung(start, end) {
+  if (!start || !end) return [];
+  return state.pengunjungRaw.filter(r => r.d >= start && r.d <= end);
 }
 function pct(curr, prev) {
   if (!prev || prev === 0) return null;
@@ -1221,8 +1248,42 @@ function aggregatePenjualan(rows) {
   return result;
 }
 
-// Daily series for an array of rows (sums revenue & visitors per date)
-function dailySeries(rows, valueKey = 'r') {
+// Aggregasi khusus untuk data Pengunjung (kolom q = Jumlah Pengunjung)
+function aggregatePengunjung(rows) {
+  const result = { total: 0, byUnit: new Map(), byPlatform: new Map(), byJenis: new Map(), byKelompok: new Map() };
+  for (const r of rows) {
+    result.total += r.q;
+    const updMap = (m, k) => { m.set(k, (m.get(k) || 0) + r.q); };
+    updMap(result.byUnit, r.u);
+    updMap(result.byPlatform, r.p);
+    updMap(result.byJenis, r.j);
+    updMap(result.byKelompok, r.k);
+  }
+  return result;
+}
+// Daily series untuk pengunjung (key q)
+function dailySeriesInRangePengunjung(rows, startISO, endISO) {
+  const m = new Map();
+  rows.forEach(r => { m.set(r.d, (m.get(r.d) || 0) + r.q); });
+  const dates = [];
+  let cur = ISOToDate(startISO), endD = ISOToDate(endISO);
+  while (cur <= endD) { dates.push(dateToISO(cur)); cur = addDays(cur, 1); }
+  return { labels: dates, values: dates.map(d => m.get(d) || 0) };
+}
+// Daftar unit dari data pengunjung
+function getRealUnitsFromPengunjung() {
+  const all = new Set();
+  state.pengunjungRaw.forEach(r => { if (r.u !== TIDAK_DITEMUKAN) all.add(r.u); });
+  return [...all].sort((a, b) => {
+    const ai = UNIT_ORDER.indexOf(a), bi = UNIT_ORDER.indexOf(b);
+    if (ai >= 0 && bi >= 0) return ai - bi;
+    if (ai >= 0) return -1;
+    if (bi >= 0) return 1;
+    return a.localeCompare(b);
+  });
+}
+// Daily series without explicit date range (just aggregates available dates)
+function dailySeriesFiltered(rows, valueKey = 'r') {
   const m = new Map();
   rows.forEach(r => { m.set(r.d, (m.get(r.d) || 0) + r[valueKey]); });
   // Fill in missing dates with 0 between min and max
@@ -1363,58 +1424,56 @@ function renderUnitPendapatan(unit, idx) {
   renderPie(`${slug}_pieKelompok`, cur.byKelompok, 'Kelompok');
 }
 
-// ============ PENGUNJUNG (per-unit, separated, NO pie) ============
+// ============ PENGUNJUNG — data dari Database_Pengunjung (state.pengunjungRaw) ============
 function renderPengunjungOverall() {
-  const curRows = filterPenj(state.cur.start, state.cur.end);
-  const cmpRows = state.cmp.enabled ? filterPenj(state.cmp.start, state.cmp.end) : [];
-  const cur = aggregatePenjualan(curRows);
-  const cmp = aggregatePenjualan(cmpRows);
-  
-  const realUnits = getRealUnits();
+  const curRows = filterPengunjung(state.cur.start, state.cur.end);
+  const cmpRows = state.cmp.enabled ? filterPengunjung(state.cmp.start, state.cmp.end) : [];
+  const cur = aggregatePengunjung(curRows);
+  const cmp = aggregatePengunjung(cmpRows);
+
+  const realUnits = getRealUnitsFromPengunjung();
   const allUnits = [...realUnits];
   const tidakAda = curRows.some(r => r.u === TIDAK_DITEMUKAN) || cmpRows.some(r => r.u === TIDAK_DITEMUKAN);
   if (tidakAda) allUnits.push(TIDAK_DITEMUKAN);
 
-  // KPI: total visitors + per-unit cards
-  const cards = [{ cls: '', label: 'TOTAL PENGUNJUNG', curr: cur.visitors, prev: cmp.visitors, isCurrency: false, unit: 'orang' }];
-  for (const u of allUnits) {
-    const cv = cur.byUnit.get(u)?.visitors || 0;
-    const pv = cmp.byUnit.get(u)?.visitors || 0;
-    const colors = ['amber', 'green', 'blue', 'purple', 'pink', 'teal', ''];
+  // KPI: total + per-unit
+  const colorNames = ['amber', 'green', 'blue', 'purple', 'pink', 'teal', ''];
+  const cards = [{ cls: '', label: 'TOTAL PENGUNJUNG', curr: cur.total, prev: cmp.total, isCurrency: false, unit: 'orang' }];
+  allUnits.forEach((u, i) => {
     cards.push({
-      cls: colors[allUnits.indexOf(u) % colors.length],
+      cls: colorNames[i % colorNames.length],
       label: unitDisplayName(u).toUpperCase(),
-      curr: cv, prev: pv, isCurrency: false, unit: 'orang'
+      curr: cur.byUnit.get(u) || 0,
+      prev: cmp.byUnit.get(u) || 0,
+      isCurrency: false, unit: 'orang'
     });
-  }
+  });
   document.getElementById('pengunjungKpi').innerHTML = cards.map(c => renderKPICard(c)).join('');
-  // Adjust grid columns based on count
   const grid = document.getElementById('pengunjungKpi');
   grid.className = `kpi-grid cols-${Math.min(cards.length <= 4 ? cards.length : (cards.length === 5 ? 5 : 4))}`;
 
-  // Stacked daily visitors per unit (current period only)
+  // Stacked bar harian per unit
   const dates = [];
   let cd = ISOToDate(state.cur.start), endD = ISOToDate(state.cur.end);
   while (cd <= endD) { dates.push(dateToISO(cd)); cd = addDays(cd, 1); }
-  
+
+  const colorList = ['#d4a574', '#4ade80', '#a78bfa', '#60a5fa', '#fbbf24', '#f472b6', '#94a3b8'];
   const datasets = allUnits.map((u, i) => {
-    const colorList = ['#d4a574', '#4ade80', '#a78bfa', '#60a5fa', '#fbbf24', '#f472b6', '#94a3b8'];
     const m = new Map();
-    curRows.filter(r => r.u === u).forEach(r => { m.set(r.d, (m.get(r.d)||0) + r.v); });
+    curRows.filter(r => r.u === u).forEach(r => { m.set(r.d, (m.get(r.d) || 0) + r.q); });
     return {
       label: unitDisplayName(u),
       data: dates.map(d => m.get(d) || 0),
       backgroundColor: colorList[i % colorList.length],
       borderColor: colorList[i % colorList.length],
-      borderWidth: 0,
-      stack: 'visitors'
+      borderWidth: 0, stack: 'visitors'
     };
   });
   makeChart('pengunjungTrend', {
     type: 'bar', data: { labels: dates.map(FMT_DM), datasets },
     options: {
       responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { position: 'top', align: 'end' }, tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => `${ctx.dataset.label}: ${FMT_NUM(ctx.parsed.y)}` } } },
+      plugins: { legend: { position: 'top', align: 'end' }, tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => `${ctx.dataset.label}: ${FMT_NUM(ctx.parsed.y)} orang` } } },
       scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 14 } }, y: { stacked: true, grid: { color: '#1f2a38' }, ticks: { callback: v => FMT_COMPACT(v) } } }
     }
   });
@@ -1422,26 +1481,28 @@ function renderPengunjungOverall() {
 
 function renderUnitPengunjung(unit, idx) {
   const slug = `unitvis_${idx}`;
-  const curUnit = filterPenj(state.cur.start, state.cur.end).filter(r => r.u === unit);
-  const cmpUnit = state.cmp.enabled ? filterPenj(state.cmp.start, state.cmp.end).filter(r => r.u === unit) : [];
-  const cur = aggregatePenjualan(curUnit);
-  const cmp = aggregatePenjualan(cmpUnit);
-  
-  // KPI: visitors only (no revenue here — that's in pendapatan section)
+  const curUnit = filterPengunjung(state.cur.start, state.cur.end).filter(r => r.u === unit);
+  const cmpUnit = state.cmp.enabled ? filterPengunjung(state.cmp.start, state.cmp.end).filter(r => r.u === unit) : [];
+  const cur = aggregatePengunjung(curUnit);
+  const cmp = aggregatePengunjung(cmpUnit);
+  const nDaysCur = Math.max(1, daysBetween(ISOToDate(state.cur.start), ISOToDate(state.cur.end)) + 1);
+  const nDaysCmp = Math.max(1, daysBetween(ISOToDate(state.cmp.start || state.cur.start), ISOToDate(state.cmp.end || state.cur.end)) + 1);
+
+  // KPI
   const cards = [
-    { cls: 'blue', label: 'TOTAL PENGUNJUNG', curr: cur.visitors, prev: cmp.visitors, isCurrency: false, unit: 'orang' },
-    { cls: '', label: 'AVG PER HARI', curr: cur.visitors / Math.max(1, daysBetween(ISOToDate(state.cur.start), ISOToDate(state.cur.end))+1), prev: cmp.visitors / Math.max(1, daysBetween(ISOToDate(state.cmp.start || state.cur.start), ISOToDate(state.cmp.end || state.cur.end))+1), isCurrency: false, unit: 'orang/hari' },
+    { cls: 'blue', label: 'TOTAL PENGUNJUNG', curr: cur.total, prev: cmp.total, isCurrency: false, unit: 'orang' },
+    { cls: '', label: 'AVG PER HARI', curr: cur.total / nDaysCur, prev: cmp.total / nDaysCmp, isCurrency: false, unit: 'orang/hari' },
   ];
   const kpiEl = document.getElementById(`${slug}_kpi`);
   if (kpiEl) kpiEl.innerHTML = cards.map(c => renderKPICard(c)).join('');
 
-  // Daily trend
-  const cs = dailySeriesInRange(curUnit, state.cur.start, state.cur.end, 'v');
+  // Daily trend — menggunakan kolom q dari pengunjungRaw
+  const cs = dailySeriesInRangePengunjung(curUnit, state.cur.start, state.cur.end);
   const datasets = [{ label: 'Periode Analisis', data: cs.values, borderColor: '#60a5fa',
     backgroundColor: ctx => { const g = ctx.chart.ctx.createLinearGradient(0,0,0,300); g.addColorStop(0, 'rgba(96,165,250,0.3)'); g.addColorStop(1, 'rgba(96,165,250,0)'); return g; },
     borderWidth: 2.5, fill: true, tension: 0.3, pointRadius: 0 }];
   if (state.cmp.enabled && cmpUnit.length > 0) {
-    const ps = dailySeriesInRange(cmpUnit, state.cmp.start, state.cmp.end, 'v');
+    const ps = dailySeriesInRangePengunjung(cmpUnit, state.cmp.start, state.cmp.end);
     datasets.push({ label: 'Pembanding', data: ps.values, borderColor: '#a78bfa', borderWidth: 1.8, fill: false, tension: 0.3, pointRadius: 0, borderDash: [5,4] });
   }
   makeChart(`${slug}_trend`, {
@@ -1727,7 +1788,7 @@ async function exportToPDF() {
 document.getElementById('refreshAllBtn').addEventListener('click', async () => {
   const btn = document.getElementById('refreshAllBtn');
   btn.disabled = true;
-  await Promise.all([loadPDA(), loadPenjualan()]);
+  await Promise.all([loadPDA(), loadPenjualan(), loadPengunjung()]);
   recomputeDataRange();
   // Rebuild section DOMs in case unit list changed
   buildPerUnitSections();
@@ -1762,14 +1823,18 @@ buildPresetList();
   if (cached) {
     if (cached.pdaCache && cached.pdaCache.length > 0) state.pdaRaw = cached.pdaCache;
     if (cached.penjCache && cached.penjCache.length > 0) state.penjRaw = cached.penjCache;
+    if (cached.pengunjungCache && cached.pengunjungCache.length > 0) state.pengunjungRaw = cached.pengunjungCache;
     if (cached.pdaUrl) state.pdaUrl = cached.pdaUrl;
     if (cached.penjUrl) state.penjUrl = cached.penjUrl;
+    if (cached.pengunjungUrl) state.pengunjungUrl = cached.pengunjungUrl;
     state.pdaLastFetch = cached.pdaLastFetch;
     state.penjLastFetch = cached.penjLastFetch;
+    state.pengunjungLastFetch = cached.pengunjungLastFetch;
   }
   // Bootstrap fallbacks if still empty
   if (state.pdaRaw.length === 0) state.pdaRaw = PDA_FALLBACK;
   if (state.penjRaw.length === 0) state.penjRaw = PENJ_FALLBACK;
+  // No fallback for pengunjung - it should load from spreadsheet
   
   recomputeDataRange();
   applyPreset('last28');
@@ -1778,10 +1843,11 @@ buildPresetList();
   renderAll();
   setStatus('pda', state.pdaRaw === PDA_FALLBACK ? 'cached' : 'cached', state.pdaRaw === PDA_FALLBACK ? 'PDA · DEMO' : 'PDA · CACHED');
   setStatus('penj', state.penjRaw === PENJ_FALLBACK ? 'cached' : 'cached', state.penjRaw === PENJ_FALLBACK ? 'PENJUALAN · DEMO' : 'PENJUALAN · CACHED');
+  setStatus('pengunjung', state.pengunjungRaw.length > 0 ? 'cached' : 'loading', 'PENGUNJUNG · FETCHING');
 
   // Now try fresh fetch in background
-  const [okPda, okPenj] = await Promise.all([loadPDA(true), loadPenjualan(true)]);
-  if (okPda || okPenj) {
+  const [okPda, okPenj, okPengunjung] = await Promise.all([loadPDA(true), loadPenjualan(true), loadPengunjung(true)]);
+  if (okPda || okPenj || okPengunjung) {
     recomputeDataRange();
     applyPreset(state.cur.presetKey || 'last28');
     buildPerUnitSections();
