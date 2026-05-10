@@ -508,6 +508,8 @@ body.pdf-mode .status-bar, body.pdf-mode .date-picker-bar, body.pdf-mode .export
 <script>
 
 const PDA_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQldjdxSUizd6XUyp4_mF2RhZ52xAZ4o_QHruggcnwXTfj0_wkWDffoas5XsbfojP1meTQPQ4RzV5CA/pub?output=csv";
+// Sheet "Data tanggal urut" — berisi kolom GENERAL REVENUE (Setelah Potong)
+const PDA_DATAURUT_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQldjdxSUizd6XUyp4_mF2RhZ52xAZ4o_QHruggcnwXTfj0_wkWDffoas5XsbfojP1meTQPQ4RzV5CA/pub?gid=1342695821&single=true&output=csv";
 const PENJ_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRZPWYlaHsoy5hIV2H_Ss11bAIfijtrSZIDkkQfpVdvpZj8EhqyiuUz2yapvG9gg7bRxBeLkbY4f3Zb/pub?output=csv";
 const PENGUNJUNG_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQeMtEdSvQ3msdAgt93iqzmpoK0ijtz9dt8QTPkBtxOQL63zhKz5BKLJy-34LzBMyNb1U-4nrC_chyY/pub?output=csv";
 
@@ -571,7 +573,9 @@ const state = {
   cmp: { start: null, end: null, mode: 'previous_year_match_dow', enabled: true },
   trendMetric: 'total',
   pdaUrl: PDA_URL_DEFAULT, penjUrl: PENJ_URL_DEFAULT, pengunjungUrl: PENGUNJUNG_URL_DEFAULT,
+  pdaDataUrutUrl: PDA_DATAURUT_URL_DEFAULT, // sheet "Data tanggal urut"
   pdaLastFetch: null, penjLastFetch: null, pengunjungLastFetch: null,
+  pdaDataUrutLastFetch: null,
   pdaStatus: 'init', penjStatus: 'init',
 };
 let charts = {}; // key -> Chart instance
@@ -582,8 +586,10 @@ function saveState() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       pdaUrl: state.pdaUrl, penjUrl: state.penjUrl, pengunjungUrl: state.pengunjungUrl,
+      pdaDataUrutUrl: state.pdaDataUrutUrl,
       pdaCache: state.pdaRaw, penjCache: state.penjRaw, pengunjungCache: state.pengunjungRaw,
-      pdaLastFetch: state.pdaLastFetch, penjLastFetch: state.penjLastFetch, pengunjungLastFetch: state.pengunjungLastFetch,
+      pdaLastFetch: state.pdaLastFetch, penjLastFetch: state.penjLastFetch,
+      pengunjungLastFetch: state.pengunjungLastFetch, pdaDataUrutLastFetch: state.pdaDataUrutLastFetch,
     }));
   } catch(e) { console.warn('localStorage save failed (probably quota):', e); }
 }
@@ -659,7 +665,12 @@ const PDA_COLS = {
   room_2026: 'ROOM REVENUE 2026', room_2025: 'ROOM REVENUE 2025', room_2024: 'ROOM REVENUE 2024',
   fb_2026: 'FOOD & BEVERAGE REVENUE 2026', fb_2025: 'FOOD & BEVERAGE REVENUE 2025', fb_2024: 'FOOD & BEVERAGE REVENUE 2024',
   rr_2026: 'RUPA-RUPA REVENUE 2026', rr_2025: 'RUPA-RUPA REVENUE 2025', rr_2024: 'RUPA-RUPA REVENUE 2024',
-  genrev_2026: 'GENERAL REVENUE (Setelah Potong) 2026', genrev_2025: 'GENERAL REVENUE (Setelah Potong) 2025', genrev_2024: 'GENERAL REVENUE (Setelah Potong) 2024',
+  // genrev dibaca dari sheet terpisah "Data tanggal urut" via DATAURUT_COLS
+};
+// Kolom di sheet "Data tanggal urut"
+const DATAURUT_COLS = {
+  date: 'Tanggal',
+  genrev: 'GENERAL REVENUE (Setelah Potong)',
 };
 function findCol(headers, target) {
   const norm = s => s.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -691,13 +702,65 @@ function transformPDACSV(csvText) {
         room: colIdx['room_'+yr] >= 0 ? parseNum(row[colIdx['room_'+yr]]) : 0,
         fb: colIdx['fb_'+yr] >= 0 ? parseNum(row[colIdx['fb_'+yr]]) : 0,
         rr: colIdx['rr_'+yr] >= 0 ? parseNum(row[colIdx['rr_'+yr]]) : 0,
-        genrev: colIdx['genrev_'+yr] >= 0 ? parseNum(row[colIdx['genrev_'+yr]]) : 0,
+        genrev: 0, // diisi oleh injectGenrevFromDataUrut() setelah sheet "Data tanggal urut" di-fetch
       });
     }
   }
   if (records.length === 0) throw new Error('PDA: tidak ada baris valid');
   records.sort((a,b) => a.date.localeCompare(b.date));
   return records;
+}
+
+// ============ DATA TANGGAL URUT — PARSING & INJECT ============
+// Parse sheet "Data tanggal urut", ambil kolom Tanggal + GENERAL REVENUE (Setelah Potong)
+// Kembalikan Map: "MM-DD" => nilai genrev
+function parseDataUrutCSV(csvText) {
+  const parsed = Papa.parse(csvText, { skipEmptyLines: true });
+  if (!parsed.data || parsed.data.length < 2) throw new Error('Data tanggal urut CSV kosong/invalid');
+  const rows = parsed.data;
+  const headers = rows[0].map(h => String(h || ''));
+  const idxDate = findCol(headers, DATAURUT_COLS.date);
+  const idxGenrev = findCol(headers, DATAURUT_COLS.genrev);
+  if (idxDate < 0) throw new Error('Kolom "Tanggal" tidak ditemukan di sheet Data tanggal urut');
+  if (idxGenrev < 0) throw new Error('Kolom "GENERAL REVENUE (Setelah Potong)" tidak ditemukan di sheet Data tanggal urut');
+  const map = new Map(); // "MM-DD" => genrev
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const d = parseDateAny(row[idxDate]);
+    if (!d) continue;
+    const key = `${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    const val = parseNum(row[idxGenrev]);
+    map.set(key, val);
+  }
+  return map;
+}
+
+// Injeksi nilai genrev dari Map ke dalam state.pdaRaw
+// Hanya record tahun 2026 yang diisi (karena kolom ini tanpa tahun = data aktif/2026)
+function injectGenrevFromDataUrut(genrevMap) {
+  if (!genrevMap || genrevMap.size === 0) return;
+  state.pdaRaw.forEach(r => {
+    if (r.year === 2026) {
+      const key = `${pad(r.month)}-${pad(r.day)}`;
+      r.genrev = genrevMap.get(key) || 0;
+    }
+  });
+}
+
+async function loadPDADataUrut(silent = false) {
+  try {
+    const text = await fetchCSV(state.pdaDataUrutUrl);
+    const genrevMap = parseDataUrutCSV(text);
+    injectGenrevFromDataUrut(genrevMap);
+    state.pdaDataUrutLastFetch = new Date().toISOString();
+    saveState();
+    if (!silent) showToast(`✓ Data tanggal urut: ${genrevMap.size} baris genrev`, 'success');
+    return true;
+  } catch (e) {
+    console.error('Data tanggal urut fetch failed:', e);
+    if (!silent) showToast('✗ Data tanggal urut: ' + e.message, 'error');
+    return false;
+  }
 }
 
 // ============ PENJUALAN CSV PARSING ============
@@ -1794,7 +1857,9 @@ async function exportToPDF() {
 document.getElementById('refreshAllBtn').addEventListener('click', async () => {
   const btn = document.getElementById('refreshAllBtn');
   btn.disabled = true;
+  // Load PDA dulu, lalu inject genrev dari sheet Data tanggal urut
   await Promise.all([loadPDA(), loadPenjualan(), loadPengunjung()]);
+  await loadPDADataUrut();
   recomputeDataRange();
   // Rebuild section DOMs in case unit list changed
   buildPerUnitSections();
@@ -1853,6 +1918,8 @@ buildPresetList();
 
   // Now try fresh fetch in background
   const [okPda, okPenj, okPengunjung] = await Promise.all([loadPDA(true), loadPenjualan(true), loadPengunjung(true)]);
+  // Fetch sheet "Data tanggal urut" untuk GENERAL REVENUE (Setelah Potong)
+  await loadPDADataUrut(true);
   if (okPda || okPenj || okPengunjung) {
     recomputeDataRange();
     applyPreset(state.cur.presetKey || 'last28');
