@@ -1005,7 +1005,7 @@ function renderPDAKPI() {
   const cmp = state.cmp.enabled ? pdaTotals(filterPDA(state.cmp.start, state.cmp.end)) : null;
   const cards = [
     { cls: '', label: 'TOTAL REVENUE', curr: cur.total, prev: cmp?.total, isCurrency: true },
-    { cls: 'teal', label: 'TOTAL REVENUE (SETELAH POTONGAN)', curr: cur.genrev, prev: cmp?.genrev, isCurrency: true },
+    { cls: 'teal', label: 'TOTAL REVENUE (Setelah Potongan)', curr: cur.genrev, prev: cmp?.genrev, isCurrency: true },
     { cls: 'amber', label: 'ROOM REVENUE', curr: cur.room, prev: cmp?.room, isCurrency: true },
     { cls: 'green', label: 'F&B REVENUE', curr: cur.fb, prev: cmp?.fb, isCurrency: true },
     { cls: 'purple', label: 'RUPA-RUPA REVENUE', curr: cur.rr, prev: cmp?.rr, isCurrency: true },
