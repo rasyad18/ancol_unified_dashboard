@@ -190,6 +190,7 @@ body {
 
 /* KPI CARDS */
 .kpi-grid { display: grid; gap: 16px; margin-bottom: 24px; }
+.kpi-grid.cols-6 { grid-template-columns: repeat(6, 1fr); }
 .kpi-grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
 .kpi-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
 .kpi-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
@@ -285,6 +286,7 @@ body.pdf-mode .status-bar, body.pdf-mode .date-picker-bar, body.pdf-mode .export
 #pdfCaptureRoot { color: var(--text); }
 #pdfCaptureRoot .header { display: flex !important; justify-content: space-between !important; align-items: flex-end !important; }
 #pdfCaptureRoot .header-meta { text-align: right !important; }
+#pdfCaptureRoot .kpi-grid.cols-6 { display: grid !important; grid-template-columns: repeat(6, 1fr) !important; gap: 14px !important; }
 #pdfCaptureRoot .kpi-grid.cols-5 { display: grid !important; grid-template-columns: repeat(5, 1fr) !important; gap: 14px !important; }
 #pdfCaptureRoot .kpi-grid.cols-4 { display: grid !important; grid-template-columns: repeat(4, 1fr) !important; gap: 14px !important; }
 #pdfCaptureRoot .kpi-grid.cols-3 { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 14px !important; }
@@ -302,6 +304,7 @@ body.pdf-mode .status-bar, body.pdf-mode .date-picker-bar, body.pdf-mode .export
 
 /* RESPONSIVE */
 @media (max-width: 1280px) {
+  .kpi-grid.cols-6 { grid-template-columns: repeat(3, 1fr); }
   .kpi-grid.cols-5 { grid-template-columns: repeat(3, 1fr); }
   .kpi-grid.cols-4 { grid-template-columns: repeat(2, 1fr); }
 }
@@ -313,7 +316,7 @@ body.pdf-mode .status-bar, body.pdf-mode .date-picker-bar, body.pdf-mode .export
 }
 @media (max-width: 700px) {
   body { padding: 16px; }
-  .kpi-grid.cols-5, .kpi-grid.cols-4, .kpi-grid.cols-3 { grid-template-columns: repeat(2, 1fr); }
+  .kpi-grid.cols-6, .kpi-grid.cols-5, .kpi-grid.cols-4, .kpi-grid.cols-3 { grid-template-columns: repeat(2, 1fr); }
   .header { flex-direction: column; align-items: flex-start; gap: 16px; }
   .header-meta { text-align: left; }
   .brand-title { font-size: 28px; }
@@ -393,7 +396,7 @@ body.pdf-mode .status-bar, body.pdf-mode .date-picker-bar, body.pdf-mode .export
   <h2 class="section-title">PDA <em>Hotel & F&B</em></h2>
   <div class="section-subtitle">Pembangunan Jaya Ancol</div>
 </div>
-<div class="kpi-grid cols-5" id="pdaKpi"></div>
+<div class="kpi-grid cols-6" id="pdaKpi"></div>
 <div class="insights"><div class="insights-title">◆ PDA Insights</div><div class="insights-list" id="pdaInsights"></div></div>
 <div class="row row-2">
   <div class="panel">
@@ -656,6 +659,7 @@ const PDA_COLS = {
   room_2026: 'ROOM REVENUE 2026', room_2025: 'ROOM REVENUE 2025', room_2024: 'ROOM REVENUE 2024',
   fb_2026: 'FOOD & BEVERAGE REVENUE 2026', fb_2025: 'FOOD & BEVERAGE REVENUE 2025', fb_2024: 'FOOD & BEVERAGE REVENUE 2024',
   rr_2026: 'RUPA-RUPA REVENUE 2026', rr_2025: 'RUPA-RUPA REVENUE 2025', rr_2024: 'RUPA-RUPA REVENUE 2024',
+  genrev_2026: 'GENERAL REVENUE (Setelah Potong) 2026', genrev_2025: 'GENERAL REVENUE (Setelah Potong) 2025', genrev_2024: 'GENERAL REVENUE (Setelah Potong) 2024',
 };
 function findCol(headers, target) {
   const norm = s => s.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -687,6 +691,7 @@ function transformPDACSV(csvText) {
         room: colIdx['room_'+yr] >= 0 ? parseNum(row[colIdx['room_'+yr]]) : 0,
         fb: colIdx['fb_'+yr] >= 0 ? parseNum(row[colIdx['fb_'+yr]]) : 0,
         rr: colIdx['rr_'+yr] >= 0 ? parseNum(row[colIdx['rr_'+yr]]) : 0,
+        genrev: colIdx['genrev_'+yr] >= 0 ? parseNum(row[colIdx['genrev_'+yr]]) : 0,
       });
     }
   }
@@ -991,7 +996,7 @@ function updateGlobalHeader() {
 // ============ PDA SECTION ============
 function pdaTotals(rows) {
   const sum = k => rows.reduce((a,r) => a + (r[k]||0), 0);
-  const t = { occ: sum('occ'), room: sum('room'), fb: sum('fb'), rr: sum('rr') };
+  const t = { occ: sum('occ'), room: sum('room'), fb: sum('fb'), rr: sum('rr'), genrev: sum('genrev') };
   t.total = t.room + t.fb + t.rr;
   return t;
 }
@@ -1000,6 +1005,7 @@ function renderPDAKPI() {
   const cmp = state.cmp.enabled ? pdaTotals(filterPDA(state.cmp.start, state.cmp.end)) : null;
   const cards = [
     { cls: '', label: 'TOTAL REVENUE', curr: cur.total, prev: cmp?.total, isCurrency: true },
+    { cls: 'teal', label: 'TOTAL REVENUE (SETELAH POTONGAN)', curr: cur.genrev, prev: cmp?.genrev, isCurrency: true },
     { cls: 'amber', label: 'ROOM REVENUE', curr: cur.room, prev: cmp?.room, isCurrency: true },
     { cls: 'green', label: 'F&B REVENUE', curr: cur.fb, prev: cmp?.fb, isCurrency: true },
     { cls: 'purple', label: 'RUPA-RUPA REVENUE', curr: cur.rr, prev: cmp?.rr, isCurrency: true },
