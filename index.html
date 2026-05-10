@@ -736,14 +736,13 @@ function parseDataUrutCSV(csvText) {
 }
 
 // Injeksi nilai genrev dari Map ke dalam state.pdaRaw
-// Hanya record tahun 2026 yang diisi (karena kolom ini tanpa tahun = data aktif/2026)
+// Diinjeksi ke semua tahun (2024, 2025, 2026) karena kolom Tanggal di sheet
+// "Data tanggal urut" tidak memiliki tahun — sama seperti Database_PDA
 function injectGenrevFromDataUrut(genrevMap) {
   if (!genrevMap || genrevMap.size === 0) return;
   state.pdaRaw.forEach(r => {
-    if (r.year === 2026) {
-      const key = `${pad(r.month)}-${pad(r.day)}`;
-      r.genrev = genrevMap.get(key) || 0;
-    }
+    const key = `${pad(r.month)}-${pad(r.day)}`;
+    r.genrev = genrevMap.get(key) || 0;
   });
 }
 
