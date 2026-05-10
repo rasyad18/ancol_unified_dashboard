@@ -43,7 +43,7 @@ body {
 .brand { display: flex; flex-direction: column; gap: 4px; }
 .brand-tag { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); letter-spacing: 2px; text-transform: uppercase; }
 .brand-title { font-family: 'Fraunces', serif; font-weight: 500; font-size: 38px; letter-spacing: -1px; line-height: 1; color: var(--text); }
-.brand-title em { font-style: italic; color: var(--accent); font-weight: 400; }
+.brand-title em { font-style: normal; color: var(--accent); font-weight: 400; }
 .brand-subtitle { font-size: 13px; color: var(--text-dim); margin-top: 6px; letter-spacing: 0.3px; }
 .header-meta { text-align: right; }
 .header-meta .label { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; }
@@ -185,7 +185,7 @@ body {
 .section-header.pengunjung-section .section-num { color: var(--blue); background: rgba(96,165,250,0.15); }
 .section-header.pda-section .section-num { color: var(--purple); background: rgba(167,139,250,0.15); }
 .section-title { font-family: 'Fraunces', serif; font-weight: 500; font-size: 24px; color: var(--text); letter-spacing: -0.5px; }
-.section-title em { font-style: italic; color: var(--accent); font-weight: 400; }
+.section-title em { font-style: normal; color: var(--accent); font-weight: 400; }
 .section-subtitle { font-size: 12px; color: var(--text-dim); margin-left: auto; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.5px; }
 
 /* KPI CARDS */
@@ -865,8 +865,10 @@ async function loadPDA(silent = false) {
     state.pdaRaw = transformPDACSV(text);
     state.pdaLastFetch = new Date().toISOString();
     saveState();
-    setStatus('pda', 'live', `PDA · LIVE · ${state.pdaRaw.length} BARIS`);
-    if (!silent) showToast(`✓ PDA: ${state.pdaRaw.length} baris`, 'success');
+    // Setiap 1 baris CSV menghasilkan 3 records (2024/2025/2026), tampilkan baris asli CSV
+    const csvRows = Math.round(state.pdaRaw.length / 3);
+    setStatus('pda', 'live', `PDA · LIVE · ${csvRows} BARIS`);
+    if (!silent) showToast(`✓ PDA: ${csvRows} baris`, 'success');
     return true;
   } catch (e) {
     console.error('PDA fetch failed:', e);
@@ -893,15 +895,18 @@ async function loadPenjualan(silent = false) {
   }
 }
 async function loadPengunjung(silent = false) {
+  setStatus('pengunjung', 'loading', 'PENGUNJUNG · FETCHING');
   try {
     const text = await fetchCSV(state.pengunjungUrl);
     state.pengunjungRaw = transformPengunjungCSV(text);
     state.pengunjungLastFetch = new Date().toISOString();
     saveState();
+    setStatus('pengunjung', 'live', `PENGUNJUNG · LIVE · ${state.pengunjungRaw.length} BARIS`);
     if (!silent) showToast(`✓ Pengunjung: ${state.pengunjungRaw.length} baris`, 'success');
     return true;
   } catch (e) {
     console.error('Pengunjung fetch failed:', e);
+    setStatus('pengunjung', state.pengunjungRaw.length > 0 ? 'cached' : 'error', state.pengunjungRaw.length > 0 ? 'PENGUNJUNG · CACHED' : 'PENGUNJUNG · ERROR');
     if (!silent) showToast('✗ Pengunjung: ' + e.message, 'error');
     return false;
   }
@@ -1097,7 +1102,7 @@ function renderPDATrend() {
   const m = state.trendMetric;
   const getVal = r => m === 'total' ? (r.room+r.fb+r.rr) : (r[m]||0);
   const useRows = curRows.length >= cmpRows.length ? curRows : cmpRows;
-  const labels = useRows.map(r => FMT_DM(r.date));
+  const labels = useRows.map(r => FMT_DATE_SHORT(r.date));
   const datasets = [{
     label: 'Periode Analisis', data: curRows.map(getVal),
     borderColor: '#d4a574',
@@ -1161,7 +1166,7 @@ function renderPDAOcc() {
   const curRows = filterPDA(state.cur.start, state.cur.end);
   const cmpRows = state.cmp.enabled ? filterPDA(state.cmp.start, state.cmp.end) : [];
   const useRows = curRows.length >= cmpRows.length ? curRows : cmpRows;
-  const labels = useRows.map(r => FMT_DM(r.date));
+  const labels = useRows.map(r => FMT_DATE_SHORT(r.date));
   const datasets = [{ label: 'Periode Analisis', data: curRows.map(r=>r.occ), borderColor: '#d4a574', backgroundColor: 'rgba(212,165,116,0.1)', borderWidth: 2.5, fill: true, tension: 0.3, pointRadius: 0 }];
   if (state.cmp.enabled && cmpRows.length > 0) datasets.push({ label: 'Pembanding', data: cmpRows.map(r=>r.occ), borderColor: '#a78bfa', borderWidth: 1.8, fill: false, tension: 0.3, pointRadius: 0, borderDash: [5,4] });
   makeChart('pdaOcc', {
@@ -1179,7 +1184,7 @@ function renderPDARate() {
   const cmpRows = state.cmp.enabled ? filterPDA(state.cmp.start, state.cmp.end) : [];
   const safe = (a,b) => b > 0 ? a/b : 0;
   const useRows = curRows.length >= cmpRows.length ? curRows : cmpRows;
-  const labels = useRows.map(r => FMT_DM(r.date));
+  const labels = useRows.map(r => FMT_DATE_SHORT(r.date));
   const datasets = [{ label: 'Periode Analisis', data: curRows.map(r => safe(r.room, r.occ)), borderColor: '#d4a574', backgroundColor: 'rgba(212,165,116,0.15)', borderWidth: 2.5, fill: true, tension: 0.3, pointRadius: 0 }];
   if (state.cmp.enabled && cmpRows.length > 0) datasets.push({ label: 'Pembanding', data: cmpRows.map(r => safe(r.room, r.occ)), borderColor: '#a78bfa', borderWidth: 1.8, fill: false, tension: 0.3, pointRadius: 0, borderDash: [5,4] });
   makeChart('pdaRate', {
@@ -1398,7 +1403,7 @@ function renderPendapatanOverall() {
     datasets.push({ label: 'Pembanding', data: ps.values, borderColor: '#a78bfa', borderWidth: 1.8, fill: false, tension: 0.3, pointRadius: 0, borderDash: [5,4] });
   }
   makeChart('pendapatanTrend', {
-    type: 'line', data: { labels: cs.labels.map(FMT_DM), datasets },
+    type: 'line', data: { labels: cs.labels.map(FMT_DATE_SHORT), datasets },
     options: {
       responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'top', align: 'end' }, tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${FMT_RP(ctx.parsed.y)}` } } },
@@ -1416,9 +1421,9 @@ function renderPendapatanOverall() {
   const tidakDitemukanRev = cur.byUnit.get(TIDAK_DITEMUKAN)?.revenue || 0;
   const labels = realUnits.map(u => unitDisplayName(u));
   const data = realUnits.map(u => cur.byUnit.get(u)?.revenue || 0);
-  if (tidakDitemukanRev > 0) { labels.push('Tidak ditemukan'); data.push(tidakDitemukanRev); }
+  if (tidakDitemukanRev > 0) { labels.push('Others'); data.push(tidakDitemukanRev); }
   makeChart('pendapatanByUnit', {
-    type: 'bar', data: { labels, datasets: [{ label: 'Pendapatan', data, backgroundColor: '#4ade80', borderRadius: 4, valueLabelFormatter: v => FMT_RP_COMPACT(v) }] },
+    type: 'bar', data: { labels, datasets: [{ label: 'Pendapatan', data, backgroundColor: '#60a5fa', borderRadius: 4, valueLabelFormatter: v => FMT_RP_COMPACT(v) }] },
     options: {
       responsive: true, maintainAspectRatio: false, layout: { padding: { top: 24 } },
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => FMT_RP(ctx.parsed.y) } } },
@@ -1478,7 +1483,7 @@ function renderUnitPendapatan(unit, idx) {
     datasets.push({ label: 'Pembanding', data: ps.values, borderColor: '#a78bfa', borderWidth: 1.8, fill: false, tension: 0.3, pointRadius: 0, borderDash: [5,4] });
   }
   makeChart(`${slug}_trend`, {
-    type: 'line', data: { labels: cs.labels.map(FMT_DM), datasets },
+    type: 'line', data: { labels: cs.labels.map(FMT_DATE_SHORT), datasets },
     options: {
       responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'top', align: 'end' }, tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${FMT_RP(ctx.parsed.y)}` } } },
@@ -1504,13 +1509,14 @@ function renderPengunjungOverall() {
   const tidakAda = curRows.some(r => r.u === TIDAK_DITEMUKAN) || cmpRows.some(r => r.u === TIDAK_DITEMUKAN);
   if (tidakAda) allUnits.push(TIDAK_DITEMUKAN);
 
-  // KPI: total + per-unit
+  // KPI: per-unit saja (tanpa TOTAL PENGUNJUNG)
   const colorNames = ['amber', 'green', 'blue', 'purple', 'pink', 'teal', ''];
-  const cards = [{ cls: '', label: 'TOTAL PENGUNJUNG', curr: cur.total, prev: cmp.total, isCurrency: false, unit: 'orang' }];
+  const cards = [];
   allUnits.forEach((u, i) => {
+    const displayLabel = u === TIDAK_DITEMUKAN ? 'OTHERS' : unitDisplayName(u).toUpperCase();
     cards.push({
       cls: colorNames[i % colorNames.length],
-      label: unitDisplayName(u).toUpperCase(),
+      label: displayLabel,
       curr: cur.byUnit.get(u) || 0,
       prev: cmp.byUnit.get(u) || 0,
       isCurrency: false, unit: 'orang'
@@ -1518,7 +1524,7 @@ function renderPengunjungOverall() {
   });
   document.getElementById('pengunjungKpi').innerHTML = cards.map(c => renderKPICard(c)).join('');
   const grid = document.getElementById('pengunjungKpi');
-  grid.className = `kpi-grid cols-${Math.min(cards.length <= 4 ? cards.length : (cards.length === 5 ? 5 : 4))}`;
+  grid.className = `kpi-grid cols-${cards.length <= 3 ? cards.length : cards.length <= 6 ? 3 : 4}`;
 
   // Stacked bar harian per unit
   const dates = [];
@@ -1538,7 +1544,7 @@ function renderPengunjungOverall() {
     };
   });
   makeChart('pengunjungTrend', {
-    type: 'bar', data: { labels: dates.map(FMT_DM), datasets },
+    type: 'bar', data: { labels: dates.map(FMT_DATE_SHORT), datasets },
     options: {
       responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'top', align: 'end' }, tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => `${ctx.dataset.label}: ${FMT_NUM(ctx.parsed.y)} orang` } } },
@@ -1574,7 +1580,7 @@ function renderUnitPengunjung(unit, idx) {
     datasets.push({ label: 'Pembanding', data: ps.values, borderColor: '#a78bfa', borderWidth: 1.8, fill: false, tension: 0.3, pointRadius: 0, borderDash: [5,4] });
   }
   makeChart(`${slug}_trend`, {
-    type: 'line', data: { labels: cs.labels.map(FMT_DM), datasets },
+    type: 'line', data: { labels: cs.labels.map(FMT_DATE_SHORT), datasets },
     options: {
       responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'top', align: 'end' }, tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${FMT_NUM(ctx.parsed.y)} orang` } } },
