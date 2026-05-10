@@ -767,6 +767,7 @@ async function loadPDADataUrut(silent = false) {
 function transformPenjualanCSV(csvText) {
   const parsed = Papa.parse(csvText, { skipEmptyLines: true, header: true });
   if (!parsed.data || parsed.data.length === 0) throw new Error('Penjualan CSV kosong');
+  const rawCount = parsed.data.length; // jumlah baris asli CSV sebelum agregasi
 
   const agg = new Map();
   const cleanCat = v => {
@@ -794,7 +795,7 @@ function transformPenjualanCSV(csvText) {
   const records = Array.from(agg.values());
   if (records.length === 0) throw new Error('Penjualan: tidak ada baris valid');
   records.sort((a,b) => a.d.localeCompare(b.d));
-  return records;
+  return { records, rawCount };
 }
 
 // ============ PENGUNJUNG CSV PARSING ============
@@ -802,6 +803,7 @@ function transformPenjualanCSV(csvText) {
 function transformPengunjungCSV(csvText) {
   const parsed = Papa.parse(csvText, { skipEmptyLines: true, header: true });
   if (!parsed.data || parsed.data.length === 0) throw new Error('Pengunjung CSV kosong');
+  const rawCount = parsed.data.length; // jumlah baris asli CSV sebelum agregasi
 
   const agg = new Map();
   const cleanCat = v => {
@@ -828,7 +830,7 @@ function transformPengunjungCSV(csvText) {
   const records = Array.from(agg.values());
   if (records.length === 0) throw new Error('Pengunjung: tidak ada baris valid');
   records.sort((a,b) => a.d.localeCompare(b.d));
-  return records;
+  return { records, rawCount };
 }
 
 // ============ FETCHING ============
@@ -881,11 +883,13 @@ async function loadPenjualan(silent = false) {
   setStatus('penj', 'loading', 'PENJUALAN · FETCHING');
   try {
     const text = await fetchCSV(state.penjUrl);
-    state.penjRaw = transformPenjualanCSV(text);
+    const { records, rawCount } = transformPenjualanCSV(text);
+    state.penjRaw = records;
     state.penjLastFetch = new Date().toISOString();
     saveState();
-    setStatus('penj', 'live', `PENJUALAN · LIVE · ${state.penjRaw.length} BARIS`);
-    if (!silent) showToast(`✓ Penjualan: ${state.penjRaw.length} baris`, 'success');
+    const label = rawCount >= 1000 ? FMT_NUM(rawCount) : rawCount;
+    setStatus('penj', 'live', `PENJUALAN · LIVE · ${label} BARIS`);
+    if (!silent) showToast(`✓ Penjualan: ${label} baris`, 'success');
     return true;
   } catch (e) {
     console.error('Penjualan fetch failed:', e);
@@ -898,11 +902,13 @@ async function loadPengunjung(silent = false) {
   setStatus('pengunjung', 'loading', 'PENGUNJUNG · FETCHING');
   try {
     const text = await fetchCSV(state.pengunjungUrl);
-    state.pengunjungRaw = transformPengunjungCSV(text);
+    const { records, rawCount } = transformPengunjungCSV(text);
+    state.pengunjungRaw = records;
     state.pengunjungLastFetch = new Date().toISOString();
     saveState();
-    setStatus('pengunjung', 'live', `PENGUNJUNG · LIVE · ${state.pengunjungRaw.length} BARIS`);
-    if (!silent) showToast(`✓ Pengunjung: ${state.pengunjungRaw.length} baris`, 'success');
+    const label = rawCount >= 1000 ? FMT_NUM(rawCount) : rawCount;
+    setStatus('pengunjung', 'live', `PENGUNJUNG · LIVE · ${label} BARIS`);
+    if (!silent) showToast(`✓ Pengunjung: ${label} baris`, 'success');
     return true;
   } catch (e) {
     console.error('Pengunjung fetch failed:', e);
@@ -1506,7 +1512,8 @@ function renderPengunjungOverall() {
 
   const realUnits = getRealUnitsFromPengunjung();
   const allUnits = [...realUnits];
-  const tidakAda = curRows.some(r => r.u === TIDAK_DITEMUKAN) || cmpRows.some(r => r.u === TIDAK_DITEMUKAN);
+  // Tampilkan "Others" jika ada data TIDAK_DITEMUKAN di seluruh dataset (bukan hanya periode aktif)
+  const tidakAda = state.pengunjungRaw.some(r => r.u === TIDAK_DITEMUKAN);
   if (tidakAda) allUnits.push(TIDAK_DITEMUKAN);
 
   // KPI: per-unit saja (tanpa TOTAL PENGUNJUNG)
