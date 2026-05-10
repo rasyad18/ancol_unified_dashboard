@@ -647,7 +647,23 @@ function parseNum(v) {
 function parseDateAny(v) {
   if (!v) return null;
   if (v instanceof Date) return v;
-  const s = String(v).trim();
+  let s = String(v).trim();
+
+  // Handle Indonesian month names
+  const idMonths = {
+    'januari': 'january', 'februari': 'february', 'maret': 'march', 'mei': 'may',
+    'juni': 'june', 'juli': 'july', 'agustus': 'august', 'oktober': 'october', 'desember': 'december',
+    'agu': 'aug', 'okt': 'oct', 'des': 'dec'
+  };
+  let sLower = s.toLowerCase();
+  for (const [id, en] of Object.entries(idMonths)) {
+    if (sLower.includes(id)) {
+      // replace case-insensitive
+      s = s.replace(new RegExp(id, 'i'), en);
+      break;
+    }
+  }
+
   let d = new Date(s);
   if (!isNaN(d)) return d;
   const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
