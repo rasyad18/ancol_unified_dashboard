@@ -689,11 +689,17 @@ function transformPDACSV(csvText) {
   for (const [k, name] of Object.entries(PDA_COLS)) colIdx[k] = findCol(headers, name);
   if (colIdx.date < 0) throw new Error('Kolom "Tanggal" tidak ditemukan di PDA sheet');
   const records = [];
+  let rawCount = 0; // jumlah baris yg punya setidaknya satu nilai angka di kolom data
   for (let r = 1; r < rows.length; r++) {
     const row = rows[r];
     const d = parseDateAny(row[colIdx.date]);
     if (!d) continue;
     const m = d.getMonth()+1, day = d.getDate();
+    // Cek apakah baris ini punya setidaknya satu nilai angka di kolom manapun
+    const dataKeys = ['occ_2024','occ_2025','occ_2026','room_2024','room_2025','room_2026',
+                      'fb_2024','fb_2025','fb_2026','rr_2024','rr_2025','rr_2026'];
+    const hasData = dataKeys.some(k => colIdx[k] >= 0 && parseNum(row[colIdx[k]]) !== 0);
+    if (hasData) rawCount++;
     for (const yr of [2024, 2025, 2026]) {
       records.push({
         year: yr, month: m, day: day,
@@ -708,7 +714,7 @@ function transformPDACSV(csvText) {
   }
   if (records.length === 0) throw new Error('PDA: tidak ada baris valid');
   records.sort((a,b) => a.date.localeCompare(b.date));
-  return records;
+  return { records, rawCount };
 }
 
 // ============ DATA TANGGAL URUT — PARSING & INJECT ============
@@ -864,13 +870,14 @@ async function loadPDA(silent = false) {
   setStatus('pda', 'loading', 'PDA · FETCHING');
   try {
     const text = await fetchCSV(state.pdaUrl);
-    state.pdaRaw = transformPDACSV(text);
+    const { records, rawCount } = transformPDACSV(text);
+    state.pdaRaw = records;
     state.pdaLastFetch = new Date().toISOString();
     saveState();
-    // Setiap 1 baris CSV menghasilkan 3 records (2024/2025/2026), tampilkan baris asli CSV
-    const csvRows = Math.round(state.pdaRaw.length / 3);
-    setStatus('pda', 'live', `PDA · LIVE · ${csvRows} BARIS`);
-    if (!silent) showToast(`✓ PDA: ${csvRows} baris`, 'success');
+    // Tampilkan jumlah baris spreadsheet yang memiliki nilai angka (sesuai spreadsheet asli)
+    const label = rawCount >= 1000 ? FMT_NUM(rawCount) : rawCount;
+    setStatus('pda', 'live', `PDA · LIVE · ${label} BARIS`);
+    if (!silent) showToast(`✓ PDA: ${label} baris`, 'success');
     return true;
   } catch (e) {
     console.error('PDA fetch failed:', e);
