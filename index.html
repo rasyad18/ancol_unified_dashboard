@@ -581,6 +581,7 @@ const PDA_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQldjdx
 const PDA_DATAURUT_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQldjdxSUizd6XUyp4_mF2RhZ52xAZ4o_QHruggcnwXTfj0_wkWDffoas5XsbfojP1meTQPQ4RzV5CA/pub?gid=1342695821&single=true&output=csv";
 const PENJ_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRZPWYlaHsoy5hIV2H_Ss11bAIfijtrSZIDkkQfpVdvpZj8EhqyiuUz2yapvG9gg7bRxBeLkbY4f3Zb/pub?output=csv";
 const PENGUNJUNG_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQeMtEdSvQ3msdAgt93iqzmpoK0ijtz9dt8QTPkBtxOQL63zhKz5BKLJy-34LzBMyNb1U-4nrC_chyY/pub?output=csv";
+const TAPPING_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTieRjlbISwUthbB_BeckSNstuZpFRKoPn6dqtWtOBinNH5bjtegPfC2Laf4kPHrPcqcxX5cNEdxCPA/pub?output=csv";
 
 // Minimal fallback data (dashboard will load actual data from spreadsheet)
 const PDA_FALLBACK = [];
@@ -1009,7 +1010,26 @@ async function loadPengunjung(silent = false) {
     return false;
   }
 }
-
+async function loadTAPPING(silent = false) {
+  setStatus('tapping', 'loading', 'TAPPING · FETCHING');
+  try {
+    const text = await fetchCSV(state.pdaUrl);
+    const { records, rawCount } = transformPDACSV(text);
+    state.pdaRaw = records;
+    state.pdaLastFetch = new Date().toISOString();
+    saveState();
+    // Tampilkan jumlah baris spreadsheet yang memiliki nilai angka (sesuai spreadsheet asli)
+    const label = rawCount >= 1000 ? FMT_NUM(rawCount) : rawCount;
+    setStatus('tapping', 'live', `TAPPING · LIVE · ${label} BARIS`);
+    if (!silent) showToast(`✓ TAPPING: ${label} baris`, 'success');
+    return true;
+  } catch (e) {
+    console.error('TAPPING fetch failed:', e);
+    setStatus('tapping', state.pdaRaw.length > 0 ? 'cached' : 'error', state.pdaRaw.length > 0 ? 'TAPPING · CACHED' : 'TAPPING · ERROR');
+    if (!silent) showToast('✗ TAPPING: ' + e.message, 'error');
+    return false;
+  }
+}
 // ============ DATE / FILTER ============
 function recomputeDataRange() {
   const dates = [];
@@ -2004,12 +2024,15 @@ buildPresetList();
     if (cached.pdaCache && cached.pdaCache.length > 0) state.pdaRaw = cached.pdaCache;
     if (cached.penjCache && cached.penjCache.length > 0) state.penjRaw = cached.penjCache;
     if (cached.pengunjungCache && cached.pengunjungCache.length > 0) state.pengunjungRaw = cached.pengunjungCache;
+     if (cached.tappingCache && cached.tappingCache.length > 0) state.tappingRaw = cached.tappingCache;
     if (cached.pdaUrl) state.pdaUrl = cached.pdaUrl;
     if (cached.penjUrl) state.penjUrl = cached.penjUrl;
     if (cached.pengunjungUrl) state.pengunjungUrl = cached.pengunjungUrl;
+     if (cached.tappingUrl) state.tappingUrl = cached.tappingUrl;
     state.pdaLastFetch = cached.pdaLastFetch;
     state.penjLastFetch = cached.penjLastFetch;
     state.pengunjungLastFetch = cached.pengunjungLastFetch;
+    state.tappingLastFetch = cached.tappingLastFetch;
   }
   // Bootstrap fallbacks if still empty
   if (state.pdaRaw.length === 0) state.pdaRaw = PDA_FALLBACK;
@@ -2024,9 +2047,10 @@ buildPresetList();
   setStatus('pda', state.pdaRaw === PDA_FALLBACK ? 'cached' : 'cached', state.pdaRaw === PDA_FALLBACK ? 'PDA · DEMO' : 'PDA · CACHED');
   setStatus('penj', state.penjRaw === PENJ_FALLBACK ? 'cached' : 'cached', state.penjRaw === PENJ_FALLBACK ? 'PENJUALAN · DEMO' : 'PENJUALAN · CACHED');
   setStatus('pengunjung', state.pengunjungRaw.length > 0 ? 'cached' : 'loading', 'PENGUNJUNG · FETCHING');
+setStatus('tapping', state.tappingRaw.length > 0 ? 'cached' : 'loading', 'TAPPING · FETCHING');
 
   // Now try fresh fetch in background
-  const [okPda, okPenj, okPengunjung] = await Promise.all([loadPDA(true), loadPenjualan(true), loadPengunjung(true)]);
+  const [okPda, okPenj, okPengunjung, okTapping] = await Promise.all([loadPDA(true), loadPenjualan(true), loadPengunjung(true),loadTapping(true)]);
   // Fetch sheet "Data tanggal urut" untuk GENERAL REVENUE (Setelah Potong)
   await loadPDADataUrut(true);
   if (okPda || okPenj || okPengunjung) {
@@ -2037,13 +2061,8 @@ buildPresetList();
     renderAll();
   }
 })();
+</script></body></html>
 
-</script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="id">
-<head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ancol Tapping Pengunjung — Dashboard</title>
